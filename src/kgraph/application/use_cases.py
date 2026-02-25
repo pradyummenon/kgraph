@@ -1,0 +1,371 @@
+"""Application use cases for kgraph.
+
+Orchestrates domain services and infrastructure adapters
+to implement the CLI commands.
+"""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import anthropic
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich.tree import Tree
+
+from kgraph.config import (
+    CONFIG_DIR,
+    CONFIG_FILE,
+    EmbeddingConfig,
+    KgraphConfig,
+    LLMConfig,
+    Neo4jConfig,
+    save_config,
+)
+from kgraph.domain.models import Entity
+from kgraph.domain.services import deduplicate_entities, deduplicate_relationships
+from kgraph.infrastructure.chunker import chunk_text, read_documents
+from kgraph.infrastructure.embedder import LocalEmbedder, OpenAIEmbedder
+from kgraph.infrastructure.extractor import ClaudeExtractor
+from kgraph.infrastructure.graph import Neo4jGraph
+from kgraph.infrastructure.retriever import HybridRetriever
+
+if TYPE_CHECKING:
+    pass
+
+
+class InitUseCase:
+    """Set up Neo4j connection, API keys, and required indexes."""
+
+    def __init__(self, console: Console) -> None:
+        self._console = console
+
+    def execute(self) -> None:
+        import typer
+
+        self._console.print("\n[bold]kgraph init[/bold] — setting up your knowledge graph\n")
+
+        # Collect Neo4j config
+        uri = typer.prompt("Neo4j URI", default="bolt://localhost:7687")
+        username = typer.prompt("Neo4j username", default="neo4j")
+        password = typer.prompt("Neo4j password", default="kgraph-password", hide_input=True)
+
+        # Collect API keys
+        anthropic_key = typer.prompt("Anthropic API key", hide_input=True)
+        embedding_provider = typer.prompt("Embedding provider (openai/local)", default="openai")
+
+        openai_key = ""
+        if embedding_provider == "openai":
+            openai_key = typer.prompt("OpenAI API key (for embeddings)", hide_input=True)
+
+        dim = 1536 if embedding_provider == "openai" else 768
+
+        config = KgraphConfig(
+            neo4j=Neo4jConfig(uri=uri, username=username, password=password),
+            llm=LLMConfig(anthropic_api_key=anthropic_key),
+            embedding=EmbeddingConfig(
+                provider=embedding_provider,
+                openai_api_key=openai_key,
+                dimensions=dim,
+            ),
+        )
+
+        # Save config
+        save_config(config)
+        self._console.print(f"  [green]✓[/green] Config saved to {CONFIG_FILE}")
+
+        # Test Neo4j connection
+        import asyncio
+
+        graph = Neo4jGraph(uri=uri, username=username, password=password)
+        connected = asyncio.run(graph.verify_connection())
+        if connected:
+            self._console.print("  [green]✓[/green] Neo4j connection verified")
+            asyncio.run(graph.ensure_indexes(vector_dimensions=dim))
+            self._console.print("  [green]✓[/green] Indexes and constraints created")
+            asyncio.run(graph.close())
+        else:
+            self._console.print("  [red]✗[/red] Could not connect to Neo4j")
+            self._console.print("    Make sure Neo4j is running and credentials are correct.")
+
+        self._console.print("\n[bold green]Setup complete![/bold green]\n")
+
+
+class IngestUseCase:
+    """Extract entities and relationships from documents into Neo4j."""
+
+    def __init__(self, config: KgraphConfig, console: Console) -> None:
+        self._config = config
+        self._console = console
+
+    def execute(self, path: Path, batch_size: int = 10_000) -> None:
+        import asyncio
+
+        asyncio.run(self._run(path, batch_size))
+
+    async def _run(self, path: Path, batch_size: int) -> None:
+        # Read documents
+        documents = read_documents(path)
+        self._console.print(f"  Found {len(documents)} document(s)")
+
+        # Chunk all documents
+        all_chunks = []
+        for filename, content in documents:
+            chunks = chunk_text(content, filename)
+            all_chunks.extend(chunks)
+        self._console.print(f"  Split into {len(all_chunks)} chunks")
+
+        # Set up infrastructure
+        extractor = ClaudeExtractor(
+            api_key=self._config.llm.anthropic_api_key,
+            model=self._config.llm.model,
+        )
+
+        if self._config.embedding.provider == "openai":
+            embedder = OpenAIEmbedder(
+                api_key=self._config.embedding.openai_api_key,
+                model=self._config.embedding.openai_model,
+                dim=self._config.embedding.dimensions,
+            )
+        else:
+            embedder = LocalEmbedder(model_name=self._config.embedding.local_model)
+
+        graph = Neo4jGraph(
+            uri=self._config.neo4j.uri,
+            username=self._config.neo4j.username,
+            password=self._config.neo4j.password,
+        )
+
+        all_entities: list[Entity] = []
+        all_relationships = []
+
+        # Extract entities and relationships
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self._console,
+        ) as progress:
+            task = progress.add_task("Extracting entities...", total=len(all_chunks))
+
+            for chunk in all_chunks:
+                result = await extractor.extract(chunk)
+                all_entities.extend(result.entities)
+                all_relationships.extend(result.relationships)
+                progress.advance(task)
+
+        # Deduplicate
+        all_entities = deduplicate_entities(all_entities)
+        all_relationships = deduplicate_relationships(all_relationships)
+        self._console.print(
+            f"  Extracted {len(all_entities)} unique entities, "
+            f"{len(all_relationships)} unique relationships"
+        )
+
+        # Generate embeddings
+        self._console.print("  Generating embeddings...")
+        texts = [e.embedding_text for e in all_entities]
+        embeddings = await embedder.embed(texts)
+
+        # Attach embeddings to entities
+        entities_with_embeddings = [
+            Entity(
+                name=e.name,
+                entity_type=e.entity_type,
+                description=e.description,
+                source=e.source,
+                embedding=emb,
+            )
+            for e, emb in zip(all_entities, embeddings)
+        ]
+
+        # Ingest into Neo4j
+        self._console.print("  Writing to Neo4j...")
+        entity_count = await graph.ingest_entities(entities_with_embeddings, batch_size)
+        rel_count = await graph.ingest_relationships(all_relationships, batch_size)
+        await graph.close()
+
+        # Summary
+        table = Table(title="Ingestion Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", style="green")
+        table.add_row("Documents processed", str(len(documents)))
+        table.add_row("Chunks processed", str(len(all_chunks)))
+        table.add_row("Entities written", str(entity_count))
+        table.add_row("Relationships written", str(rel_count))
+        self._console.print(table)
+
+
+class QueryUseCase:
+    """Query the knowledge graph with natural language."""
+
+    def __init__(self, config: KgraphConfig, console: Console) -> None:
+        self._config = config
+        self._console = console
+
+    def execute(
+        self,
+        question: str,
+        mode: str = "hybrid",
+        top_k: int = 20,
+        hops: int = 2,
+        show_raw: bool = False,
+    ) -> None:
+        import asyncio
+
+        asyncio.run(self._run(question, mode, top_k, hops, show_raw))
+
+    async def _run(
+        self, question: str, mode: str, top_k: int, hops: int, show_raw: bool
+    ) -> None:
+        start = time.monotonic()
+
+        # Set up infrastructure
+        if self._config.embedding.provider == "openai":
+            embedder = OpenAIEmbedder(
+                api_key=self._config.embedding.openai_api_key,
+                model=self._config.embedding.openai_model,
+                dim=self._config.embedding.dimensions,
+            )
+        else:
+            embedder = LocalEmbedder(model_name=self._config.embedding.local_model)
+
+        graph = Neo4jGraph(
+            uri=self._config.neo4j.uri,
+            username=self._config.neo4j.username,
+            password=self._config.neo4j.password,
+        )
+
+        # Embed the question
+        question_embedding = (await embedder.embed([question]))[0]
+
+        # Retrieve context
+        retriever = HybridRetriever(graph)
+        retrieval = await retriever.retrieve(question_embedding, top_k=top_k, hops=hops)
+
+        if show_raw:
+            self._console.print(Panel(retrieval.context_text, title="Raw Context"))
+
+        # Generate answer using Claude
+        client = anthropic.AsyncAnthropic(api_key=self._config.llm.anthropic_api_key)
+        response = await client.messages.create(
+            model=self._config.llm.model,
+            max_tokens=self._config.llm.max_tokens,
+            system=(
+                "You are a knowledge graph assistant. Answer the question using ONLY "
+                "the provided graph context. If the context doesn't contain enough "
+                "information, say so. Cite entity names when referencing information."
+            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Graph context:\n{retrieval.context_text}\n\n"
+                        f"Question: {question}"
+                    ),
+                }
+            ],
+        )
+
+        answer = response.content[0].text
+        elapsed = (time.monotonic() - start) * 1000
+
+        await graph.close()
+
+        # Display
+        self._console.print(Panel(answer, title="Answer", border_style="green"))
+        self._console.print(
+            f"  [dim]Retrieved {len(retrieval.entities)} entities, "
+            f"{len(retrieval.relationships)} relationships "
+            f"in {elapsed:.0f}ms[/dim]"
+        )
+
+
+class ExploreUseCase:
+    """Show an entity's neighborhood as a Rich tree."""
+
+    def __init__(self, config: KgraphConfig, console: Console) -> None:
+        self._config = config
+        self._console = console
+
+    def execute(self, entity_name: str, hops: int = 2) -> None:
+        import asyncio
+
+        asyncio.run(self._run(entity_name, hops))
+
+    async def _run(self, entity_name: str, hops: int) -> None:
+        graph = Neo4jGraph(
+            uri=self._config.neo4j.uri,
+            username=self._config.neo4j.username,
+            password=self._config.neo4j.password,
+        )
+
+        # Fuzzy match entity name
+        matches = await graph.fulltext_search(entity_name, limit=1)
+        if not matches:
+            self._console.print(f"[red]No entity found matching '{entity_name}'[/red]")
+            await graph.close()
+            return
+
+        root_entity = matches[0]
+        entities, relationships = await graph.expand_neighborhood([root_entity.name], hops)
+        await graph.close()
+
+        # Build tree
+        tree = Tree(
+            f"[bold cyan]{root_entity.name}[/bold cyan] "
+            f"({root_entity.entity_type}) — {root_entity.description}"
+        )
+
+        # Group relationships by type
+        rels_from_root = [r for r in relationships if r.source == root_entity.name]
+        by_type: dict[str, list[str]] = {}
+        for r in rels_from_root:
+            by_type.setdefault(r.relationship_type, []).append(r.target)
+
+        for rel_type, targets in by_type.items():
+            branch = tree.add(f"[yellow]{rel_type}[/yellow]")
+            for target_name in targets:
+                target = next((e for e in entities if e.name == target_name), None)
+                if target:
+                    branch.add(
+                        f"[green]{target.name}[/green] "
+                        f"({target.entity_type}) — {target.description}"
+                    )
+                else:
+                    branch.add(f"[green]{target_name}[/green]")
+
+        self._console.print(tree)
+
+
+class StatsUseCase:
+    """Display knowledge graph statistics."""
+
+    def __init__(self, config: KgraphConfig, console: Console) -> None:
+        self._config = config
+        self._console = console
+
+    def execute(self) -> None:
+        import asyncio
+
+        asyncio.run(self._run())
+
+    async def _run(self) -> None:
+        graph = Neo4jGraph(
+            uri=self._config.neo4j.uri,
+            username=self._config.neo4j.username,
+            password=self._config.neo4j.password,
+        )
+
+        stats = await graph.get_stats()
+        await graph.close()
+
+        table = Table(title="Knowledge Graph Statistics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", style="green")
+        table.add_row("Total entities", str(stats.get("nodes", 0)))
+        table.add_row("Total relationships", str(stats.get("relationships", 0)))
+        self._console.print(table)

@@ -1,0 +1,33 @@
+# secrets
+.env
+
+# python
+*.pyc
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+.venv/
+.uv/
+
+# ide
+.idea/
+.vscode/
+*.iml
+
+# java (just in case)
+target/
+.gradle/
+
+# node
+node_modules/
+
+# os
+.DS_Store
+Thumbs.db
+
+# kgraph
+~/.kgraph/
