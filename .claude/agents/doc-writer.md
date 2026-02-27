@@ -40,7 +40,7 @@ structure:
 6. **project structure** — annotated tree of key directories
 7. **tech stack** — what's used and why each choice was made
 8. **what i learned** — 3-5 bullet points of key takeaways (personal voice)
-9. **license** — MIT unless specified otherwise
+9. **license** — only if explicitly specified by the author
 
 ### core concepts documentation (docs/concepts/)
 

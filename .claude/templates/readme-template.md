@@ -50,7 +50,3 @@ cd {project-name}
 - {takeaway 1}
 - {takeaway 2}
 - {takeaway 3}
-
-## license
-
-MIT

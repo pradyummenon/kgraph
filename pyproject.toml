@@ -3,7 +3,6 @@ name = "kgraph"
 version = "0.1.0"
 description = "CLI tool for building and querying knowledge graphs from documents"
 requires-python = ">=3.10"
-license = "MIT"
 authors = [
     { name = "pradyummenon" },
 ]

@@ -203,7 +203,3 @@ kgraph/
 | google gemini | structured extraction via JSON mode + embeddings |
 | neo4j | graph DB with HNSW vector index, full-text index, APOC |
 | pydantic | strict data models, JSON schema generation for LLM tool use |
-
-## license
-
-MIT
