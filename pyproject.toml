@@ -2,7 +2,7 @@
 name = "kgraph"
 version = "0.1.0"
 description = "CLI tool for building and querying knowledge graphs from documents"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
     { name = "pradyummenon" },
@@ -17,6 +17,7 @@ dependencies = [
     "pydantic>=2.0",
     "tomli>=2.0; python_version < '3.11'",
     "tomli-w>=1.0",
+    "google-genai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -43,14 +44,14 @@ build-backend = "hatchling.build"
 packages = ["src/kgraph"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

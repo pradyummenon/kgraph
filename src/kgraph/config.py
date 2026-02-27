@@ -30,7 +30,9 @@ class Neo4jConfig:
 class LLMConfig:
     """LLM configuration for extraction and answer generation."""
 
+    provider: str = "anthropic"  # "anthropic" or "gemini"
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
     model: str = "claude-sonnet-4-20250514"
     max_tokens: int = 4096
 
@@ -39,11 +41,13 @@ class LLMConfig:
 class EmbeddingConfig:
     """Embedding configuration."""
 
-    provider: str = "openai"  # "openai" or "local"
+    provider: str = "openai"  # "openai", "gemini", or "local"
     openai_api_key: str = ""
+    gemini_api_key: str = ""
     openai_model: str = "text-embedding-3-small"
+    gemini_model: str = "gemini-embedding-001"
     local_model: str = "BAAI/bge-base-en-v1.5"
-    dimensions: int = 1536  # 1536 for openai, 768 for local
+    dimensions: int = 1536  # 1536 for openai, 768 for local/gemini
 
 
 @dataclass(frozen=True)
@@ -92,14 +96,18 @@ def save_config(config: KgraphConfig) -> None:
             "password": config.neo4j.password,
         },
         "llm": {
+            "provider": config.llm.provider,
             "anthropic_api_key": config.llm.anthropic_api_key,
+            "gemini_api_key": config.llm.gemini_api_key,
             "model": config.llm.model,
             "max_tokens": config.llm.max_tokens,
         },
         "embedding": {
             "provider": config.embedding.provider,
             "openai_api_key": config.embedding.openai_api_key,
+            "gemini_api_key": config.embedding.gemini_api_key,
             "openai_model": config.embedding.openai_model,
+            "gemini_model": config.embedding.gemini_model,
             "local_model": config.embedding.local_model,
             "dimensions": config.embedding.dimensions,
         },

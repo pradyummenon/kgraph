@@ -29,8 +29,8 @@ from kgraph.config import (
 from kgraph.domain.models import Entity
 from kgraph.domain.services import deduplicate_entities, deduplicate_relationships
 from kgraph.infrastructure.chunker import chunk_text, read_documents
-from kgraph.infrastructure.embedder import LocalEmbedder, OpenAIEmbedder
-from kgraph.infrastructure.extractor import ClaudeExtractor
+from kgraph.infrastructure.embedder import GeminiEmbedder, LocalEmbedder, OpenAIEmbedder
+from kgraph.infrastructure.extractor import ClaudeExtractor, GeminiExtractor
 from kgraph.infrastructure.graph import Neo4jGraph
 from kgraph.infrastructure.retriever import HybridRetriever
 
@@ -54,22 +54,53 @@ class InitUseCase:
         username = typer.prompt("Neo4j username", default="neo4j")
         password = typer.prompt("Neo4j password", default="kgraph-password", hide_input=True)
 
-        # Collect API keys
-        anthropic_key = typer.prompt("Anthropic API key", hide_input=True)
-        embedding_provider = typer.prompt("Embedding provider (openai/local)", default="openai")
+        # Collect LLM provider
+        llm_provider = typer.prompt("LLM provider (anthropic/gemini)", default="gemini")
+
+        anthropic_key = ""
+        gemini_llm_key = ""
+        llm_model = ""
+        if llm_provider == "anthropic":
+            anthropic_key = typer.prompt("Anthropic API key", hide_input=True)
+            llm_model = "claude-sonnet-4-20250514"
+        else:
+            gemini_llm_key = typer.prompt("Gemini API key", hide_input=True)
+            llm_model = "gemini-2.0-flash"
+
+        # Collect embedding provider
+        default_embed = "gemini" if llm_provider == "gemini" else "openai"
+        embedding_provider = typer.prompt(
+            "Embedding provider (openai/gemini/local)", default=default_embed
+        )
 
         openai_key = ""
+        gemini_embed_key = ""
         if embedding_provider == "openai":
             openai_key = typer.prompt("OpenAI API key (for embeddings)", hide_input=True)
-
-        dim = 1536 if embedding_provider == "openai" else 768
+            dim = 1536
+        elif embedding_provider == "gemini":
+            # Reuse Gemini key if already provided, otherwise ask
+            if gemini_llm_key:
+                gemini_embed_key = gemini_llm_key
+                self._console.print("  [dim]Reusing Gemini API key for embeddings[/dim]")
+            else:
+                gemini_embed_key = typer.prompt("Gemini API key (for embeddings)", hide_input=True)
+            dim = 768
+        else:
+            dim = 768
 
         config = KgraphConfig(
             neo4j=Neo4jConfig(uri=uri, username=username, password=password),
-            llm=LLMConfig(anthropic_api_key=anthropic_key),
+            llm=LLMConfig(
+                provider=llm_provider,
+                anthropic_api_key=anthropic_key,
+                gemini_api_key=gemini_llm_key,
+                model=llm_model,
+            ),
             embedding=EmbeddingConfig(
                 provider=embedding_provider,
                 openai_api_key=openai_key,
+                gemini_api_key=gemini_embed_key,
                 dimensions=dim,
             ),
         )
@@ -78,19 +109,22 @@ class InitUseCase:
         save_config(config)
         self._console.print(f"  [green]✓[/green] Config saved to {CONFIG_FILE}")
 
-        # Test Neo4j connection
+        # Test Neo4j connection — all async ops in a single event loop
         import asyncio
 
-        graph = Neo4jGraph(uri=uri, username=username, password=password)
-        connected = asyncio.run(graph.verify_connection())
-        if connected:
-            self._console.print("  [green]✓[/green] Neo4j connection verified")
-            asyncio.run(graph.ensure_indexes(vector_dimensions=dim))
-            self._console.print("  [green]✓[/green] Indexes and constraints created")
-            asyncio.run(graph.close())
-        else:
-            self._console.print("  [red]✗[/red] Could not connect to Neo4j")
-            self._console.print("    Make sure Neo4j is running and credentials are correct.")
+        async def _test_and_setup() -> None:
+            graph = Neo4jGraph(uri=uri, username=username, password=password)
+            connected = await graph.verify_connection()
+            if connected:
+                self._console.print("  [green]✓[/green] Neo4j connection verified")
+                await graph.ensure_indexes(vector_dimensions=dim)
+                self._console.print("  [green]✓[/green] Indexes and constraints created")
+                await graph.close()
+            else:
+                self._console.print("  [red]✗[/red] Could not connect to Neo4j")
+                self._console.print("    Make sure Neo4j is running and credentials are correct.")
+
+        asyncio.run(_test_and_setup())
 
         self._console.print("\n[bold green]Setup complete![/bold green]\n")
 
@@ -119,16 +153,29 @@ class IngestUseCase:
             all_chunks.extend(chunks)
         self._console.print(f"  Split into {len(all_chunks)} chunks")
 
-        # Set up infrastructure
-        extractor = ClaudeExtractor(
-            api_key=self._config.llm.anthropic_api_key,
-            model=self._config.llm.model,
-        )
+        # Set up extractor based on LLM provider
+        if self._config.llm.provider == "gemini":
+            extractor = GeminiExtractor(
+                api_key=self._config.llm.gemini_api_key,
+                model=self._config.llm.model,
+            )
+        else:
+            extractor = ClaudeExtractor(
+                api_key=self._config.llm.anthropic_api_key,
+                model=self._config.llm.model,
+            )
 
+        # Set up embedder based on embedding provider
         if self._config.embedding.provider == "openai":
             embedder = OpenAIEmbedder(
                 api_key=self._config.embedding.openai_api_key,
                 model=self._config.embedding.openai_model,
+                dim=self._config.embedding.dimensions,
+            )
+        elif self._config.embedding.provider == "gemini":
+            embedder = GeminiEmbedder(
+                api_key=self._config.embedding.gemini_api_key,
+                model=self._config.embedding.gemini_model,
                 dim=self._config.embedding.dimensions,
             )
         else:
@@ -223,11 +270,17 @@ class QueryUseCase:
     ) -> None:
         start = time.monotonic()
 
-        # Set up infrastructure
+        # Set up embedder
         if self._config.embedding.provider == "openai":
             embedder = OpenAIEmbedder(
                 api_key=self._config.embedding.openai_api_key,
                 model=self._config.embedding.openai_model,
+                dim=self._config.embedding.dimensions,
+            )
+        elif self._config.embedding.provider == "gemini":
+            embedder = GeminiEmbedder(
+                api_key=self._config.embedding.gemini_api_key,
+                model=self._config.embedding.gemini_model,
                 dim=self._config.embedding.dimensions,
             )
         else:
@@ -249,28 +302,39 @@ class QueryUseCase:
         if show_raw:
             self._console.print(Panel(retrieval.context_text, title="Raw Context"))
 
-        # Generate answer using Claude
-        client = anthropic.AsyncAnthropic(api_key=self._config.llm.anthropic_api_key)
-        response = await client.messages.create(
-            model=self._config.llm.model,
-            max_tokens=self._config.llm.max_tokens,
-            system=(
-                "You are a knowledge graph assistant. Answer the question using ONLY "
-                "the provided graph context. If the context doesn't contain enough "
-                "information, say so. Cite entity names when referencing information."
-            ),
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Graph context:\n{retrieval.context_text}\n\n"
-                        f"Question: {question}"
-                    ),
-                }
-            ],
+        # Generate answer using configured LLM
+        answer_system = (
+            "You are a knowledge graph assistant. Answer the question using ONLY "
+            "the provided graph context. If the context doesn't contain enough "
+            "information, say so. Cite entity names when referencing information."
+        )
+        answer_prompt = (
+            f"Graph context:\n{retrieval.context_text}\n\n"
+            f"Question: {question}"
         )
 
-        answer = response.content[0].text
+        if self._config.llm.provider == "gemini":
+            from google import genai
+            from google.genai import types as genai_types
+
+            gemini_client = genai.Client(api_key=self._config.llm.gemini_api_key)
+            response = await gemini_client.aio.models.generate_content(
+                model=self._config.llm.model,
+                contents=answer_prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=answer_system,
+                ),
+            )
+            answer = response.text
+        else:
+            client = anthropic.AsyncAnthropic(api_key=self._config.llm.anthropic_api_key)
+            response = await client.messages.create(
+                model=self._config.llm.model,
+                max_tokens=self._config.llm.max_tokens,
+                system=answer_system,
+                messages=[{"role": "user", "content": answer_prompt}],
+            )
+            answer = response.content[0].text
         elapsed = (time.monotonic() - start) * 1000
 
         await graph.close()

@@ -1,12 +1,16 @@
-"""Entity and relationship extraction using Claude structured output.
+"""Entity and relationship extraction using LLM structured output.
 
-Uses Anthropic's tool use to extract entities and relationships
-from text chunks with guaranteed schema compliance.
+Supports Anthropic Claude (tool use) and Google Gemini (JSON mode)
+for extracting entities and relationships with schema compliance.
 """
 
 from __future__ import annotations
 
+import json
+
 import anthropic
+from google import genai
+from google.genai import types as genai_types
 from pydantic import BaseModel
 
 from kgraph.domain.models import Chunk, Entity, ExtractionResult, Relationship
@@ -119,6 +123,67 @@ class ClaudeExtractor:
                     )
                     for r in output.relationships
                 ]
+
+        return ExtractionResult(
+            entities=entities,
+            relationships=relationships,
+            source_chunk=chunk,
+        )
+
+
+class GeminiExtractor:
+    """Extracts entities and relationships using Google Gemini's JSON mode."""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash") -> None:
+        self._client = genai.Client(api_key=api_key)
+        self._model = model
+
+    async def extract(self, chunk: Chunk) -> ExtractionResult:
+        """Extract entities and relationships from a text chunk.
+
+        Uses Gemini's structured JSON output with the same schema
+        as the Claude extractor for consistency.
+        """
+        response = await self._client.aio.models.generate_content(
+            model=self._model,
+            contents=f"Extract entities and relationships from this text:\n\n{chunk.text}",
+            config=genai_types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=ExtractionOutput,
+                temperature=0.0,
+            ),
+        )
+
+        # Parse the JSON response
+        entities: list[Entity] = []
+        relationships: list[Relationship] = []
+
+        try:
+            output = ExtractionOutput.model_validate_json(response.text)
+
+            entities = [
+                Entity(
+                    name=e.name,
+                    entity_type=e.entity_type,
+                    description=e.description,
+                    source=chunk.source_reference,
+                )
+                for e in output.entities
+            ]
+
+            relationships = [
+                Relationship(
+                    source=r.source,
+                    target=r.target,
+                    relationship_type=r.relationship_type,
+                    description=r.description,
+                )
+                for r in output.relationships
+            ]
+        except (json.JSONDecodeError, Exception):
+            # If parsing fails, return empty result rather than crashing
+            pass
 
         return ExtractionResult(
             entities=entities,
