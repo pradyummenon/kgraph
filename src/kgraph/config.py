@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import tomli_w
 import tomllib
+
+from kgraph.domain.errors import ConfigError
 
 CONFIG_DIR = Path.home() / ".kgraph"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
@@ -30,7 +32,7 @@ class Neo4jConfig:
 class LLMConfig:
     """LLM configuration for extraction and answer generation."""
 
-    provider: str = "anthropic"  # "anthropic" or "gemini"
+    provider: Literal["anthropic", "gemini"] = "anthropic"
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     model: str = "claude-sonnet-4-20250514"
@@ -41,7 +43,7 @@ class LLMConfig:
 class EmbeddingConfig:
     """Embedding configuration."""
 
-    provider: str = "openai"  # "openai", "gemini", or "local"
+    provider: Literal["openai", "gemini", "local"] = "openai"
     openai_api_key: str = ""
     gemini_api_key: str = ""
     openai_model: str = "text-embedding-3-small"
@@ -57,6 +59,7 @@ class KgraphConfig:
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    config_version: int = 1
 
 
 def load_config() -> KgraphConfig:
@@ -83,6 +86,34 @@ def load_config() -> KgraphConfig:
         llm=LLMConfig(**data.get("llm", {})),
         embedding=EmbeddingConfig(**data.get("embedding", {})),
     )
+
+
+def validate_config(config: KgraphConfig) -> None:
+    """Validate that required API keys are present for the configured providers.
+
+    Raises:
+        ConfigError: If a required API key is missing for the active provider.
+    """
+    if config.llm.provider == "anthropic" and not config.llm.anthropic_api_key:
+        raise ConfigError(
+            "LLM provider is 'anthropic' but anthropic_api_key is not set. "
+            "Run `kgraph init` to configure your API key."
+        )
+    if config.llm.provider == "gemini" and not config.llm.gemini_api_key:
+        raise ConfigError(
+            "LLM provider is 'gemini' but gemini_api_key is not set. "
+            "Run `kgraph init` to configure your API key."
+        )
+    if config.embedding.provider == "openai" and not config.embedding.openai_api_key:
+        raise ConfigError(
+            "Embedding provider is 'openai' but openai_api_key is not set. "
+            "Run `kgraph init` to configure your API key."
+        )
+    if config.embedding.provider == "gemini" and not config.embedding.gemini_api_key:
+        raise ConfigError(
+            "Embedding provider is 'gemini' but gemini_api_key is not set. "
+            "Run `kgraph init` to configure your API key."
+        )
 
 
 def save_config(config: KgraphConfig) -> None:

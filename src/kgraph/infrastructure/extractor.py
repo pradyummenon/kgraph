@@ -13,7 +13,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel
 
-from kgraph.domain.models import Chunk, Entity, ExtractionResult, Relationship
+from kgraph.domain.models import Chunk, Entity, EntityType, ExtractionResult, Relationship
 
 
 class ExtractedEntity(BaseModel):
@@ -109,7 +109,7 @@ class ClaudeExtractor:
                 entities = [
                     Entity(
                         name=e.name,
-                        entity_type=e.entity_type,
+                        entity_type=EntityType.from_llm_output(e.entity_type),
                         description=e.description,
                         source=chunk.source_reference,
                     )
@@ -167,7 +167,7 @@ class GeminiExtractor:
             entities = [
                 Entity(
                     name=e.name,
-                    entity_type=e.entity_type,
+                    entity_type=EntityType.from_llm_output(e.entity_type),
                     description=e.description,
                     source=chunk.source_reference,
                 )

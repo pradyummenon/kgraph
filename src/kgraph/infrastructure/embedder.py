@@ -33,7 +33,7 @@ class OpenAIEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Generate embeddings for a batch of texts.
 
         Args:
@@ -49,7 +49,7 @@ class OpenAIEmbedder:
             model=self._model,
             input=texts,
         )
-        return [item.embedding for item in response.data]
+        return [tuple(item.embedding) for item in response.data]
 
 
 class GeminiEmbedder:
@@ -69,7 +69,7 @@ class GeminiEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Generate embeddings for a batch of texts.
 
         Args:
@@ -82,7 +82,7 @@ class GeminiEmbedder:
             return []
 
         # Gemini limits to 100 texts per batch
-        all_embeddings: list[list[float]] = []
+        all_embeddings: list[tuple[float, ...]] = []
         batch_size = 100
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
@@ -93,7 +93,7 @@ class GeminiEmbedder:
                     output_dimensionality=self._dimensions,
                 ),
             )
-            all_embeddings.extend(e.values for e in result.embeddings)
+            all_embeddings.extend(tuple(e.values) for e in result.embeddings)
         return all_embeddings
 
 
@@ -121,7 +121,7 @@ class LocalEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Generate embeddings locally.
 
         Note: sentence-transformers is synchronous, but we wrap it
@@ -131,4 +131,4 @@ class LocalEmbedder:
             return []
 
         embeddings = self._model.encode(texts, normalize_embeddings=True)
-        return [embedding.tolist() for embedding in embeddings]
+        return [tuple(embedding.tolist()) for embedding in embeddings]

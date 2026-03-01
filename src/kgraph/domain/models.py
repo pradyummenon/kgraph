@@ -7,6 +7,26 @@ These are pure domain objects with no infrastructure dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class EntityType(StrEnum):
+    """Canonical entity types for the knowledge graph."""
+
+    PERSON = "PERSON"
+    ORGANIZATION = "ORGANIZATION"
+    CONCEPT = "CONCEPT"
+    LOCATION = "LOCATION"
+    EVENT = "EVENT"
+    TECHNOLOGY = "TECHNOLOGY"
+
+    @classmethod
+    def from_llm_output(cls, value: str) -> EntityType:
+        """Parse an EntityType from raw LLM output, defaulting to CONCEPT on unknown values."""
+        try:
+            return cls(value.upper())
+        except ValueError:
+            return cls.CONCEPT
 
 
 @dataclass(frozen=True)
@@ -18,10 +38,10 @@ class Entity:
     """
 
     name: str
-    entity_type: str  # PERSON, ORG, CONCEPT, LOCATION, EVENT, etc.
+    entity_type: EntityType
     description: str
     source: str  # Source file + chunk reference
-    embedding: list[float] = field(default_factory=list)
+    embedding: tuple[float, ...] = ()
 
     @property
     def normalized_name(self) -> str:

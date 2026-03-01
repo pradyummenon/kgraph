@@ -223,7 +223,7 @@ class IngestUseCase:
                 entity_type=e.entity_type,
                 description=e.description,
                 source=e.source,
-                embedding=emb,
+                embedding=tuple(emb),
             )
             for e, emb in zip(all_entities, embeddings, strict=True)
         ]

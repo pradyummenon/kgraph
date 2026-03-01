@@ -27,7 +27,7 @@ class EntityExtractor(Protocol):
 class EmbeddingGenerator(Protocol):
     """Protocol for generating text embeddings."""
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Generate embeddings for a batch of texts."""
         ...
 
@@ -68,6 +68,10 @@ class GraphRepository(Protocol):
 
     async def get_stats(self) -> dict[str, int]:
         """Get graph statistics (node count, relationship count, etc.)."""
+        ...
+
+    async def close(self) -> None:
+        """Release all database connections and resources."""
         ...
 
 

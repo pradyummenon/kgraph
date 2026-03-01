@@ -10,7 +10,7 @@ from typing import Any
 
 from neo4j import AsyncGraphDatabase
 
-from kgraph.domain.models import Entity, Relationship
+from kgraph.domain.models import Entity, EntityType, Relationship
 
 
 class Neo4jGraph:
@@ -75,10 +75,10 @@ class Neo4jGraph:
             params = [
                 {
                     "name": e.name,
-                    "entity_type": e.entity_type,
+                    "entity_type": str(e.entity_type),
                     "description": e.description,
                     "source": e.source,
-                    "embedding": e.embedding,
+                    "embedding": list(e.embedding),
                 }
                 for e in batch
             ]
@@ -183,7 +183,7 @@ class Neo4jGraph:
             (
                 Entity(
                     name=r["name"],
-                    entity_type=r["entity_type"],
+                    entity_type=EntityType.from_llm_output(r["entity_type"]),
                     description=r["description"],
                     source=r["source"] or "",
                 ),
@@ -242,7 +242,7 @@ class Neo4jGraph:
         entities = [
             Entity(
                 name=e["name"],
-                entity_type=e["entity_type"],
+                entity_type=EntityType.from_llm_output(e["entity_type"]),
                 description=e["description"] or "",
                 source=e["source"] or "",
             )
@@ -282,7 +282,7 @@ class Neo4jGraph:
         return [
             Entity(
                 name=r["name"],
-                entity_type=r["entity_type"],
+                entity_type=EntityType.from_llm_output(r["entity_type"]),
                 description=r["description"] or "",
                 source=r["source"] or "",
             )
