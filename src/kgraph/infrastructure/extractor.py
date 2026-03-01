@@ -249,7 +249,7 @@ class GeminiExtractor:
                 )
                 for r in output.relationships
             ]
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, ValueError) as exc:
             _log.warning(
                 "extractor.gemini.parse_failure",
                 source=chunk.source_reference,
