@@ -2,7 +2,7 @@
 
 import pytest
 
-from kgraph.domain.models import Chunk, Entity, Relationship
+from kgraph.domain.models import Chunk, Entity, EntityType, Relationship
 
 
 @pytest.fixture
@@ -26,19 +26,19 @@ def sample_entities() -> list[Entity]:
     return [
         Entity(
             name="Marie Curie",
-            entity_type="PERSON",
+            entity_type=EntityType.PERSON,
             description="Polish-French physicist, pioneer in radioactivity research",
             source="test.md [chunk 1/1]",
         ),
         Entity(
             name="University of Paris",
-            entity_type="ORGANIZATION",
+            entity_type=EntityType.ORGANIZATION,
             description="French university where Marie Curie worked",
             source="test.md [chunk 1/1]",
         ),
         Entity(
             name="Nobel Prize",
-            entity_type="EVENT",
+            entity_type=EntityType.EVENT,
             description="Prestigious international award in physics",
             source="test.md [chunk 1/1]",
         ),
