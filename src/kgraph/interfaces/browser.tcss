@@ -2,33 +2,55 @@
     width: 30%;
     height: 100%;
     dock: left;
+    padding: 0 1;
 }
 
 #main-panel {
     width: 70%;
     height: 100%;
+    padding: 0 1;
 }
 
 #graph-view {
     height: 60%;
     border: solid green;
+    padding: 1;
+}
+
+#graph-view:focus {
+    border: solid lime;
 }
 
 #relationships-table {
     height: 40%;
 }
 
+#relationships-table:focus {
+    border: solid cyan;
+}
+
 #search-input {
     dock: top;
+    margin-bottom: 1;
+}
+
+#search-input:focus {
+    border: solid yellow;
 }
 
 #details-panel {
     height: auto;
     max-height: 30%;
-    border: solid dim;
+    border: solid grey;
     padding: 1;
+    margin-top: 1;
 }
 
 #entity-tree {
     height: 1fr;
+    border: solid grey;
+}
+
+#entity-tree:focus {
+    border: solid cyan;
 }
