@@ -9,8 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 from neo4j import AsyncGraphDatabase
+from neo4j.exceptions import Neo4jError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from kgraph.domain.errors import GraphError, ServiceUnavailableError
 from kgraph.domain.models import Entity, EntityType, Relationship
+from kgraph.infrastructure.logging import get_logger
+
+_log = get_logger(__name__)
 
 
 class Neo4jGraph:
@@ -18,6 +24,12 @@ class Neo4jGraph:
 
     def __init__(self, uri: str, username: str, password: str) -> None:
         self._driver = AsyncGraphDatabase.driver(uri, auth=(username, password))
+
+    async def __aenter__(self) -> Neo4jGraph:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -27,8 +39,10 @@ class Neo4jGraph:
         """Test the Neo4j connection. Returns True if successful."""
         try:
             await self._driver.verify_connectivity()
+            _log.info("graph.connection.verified")
             return True
-        except Exception:
+        except Exception as exc:
+            _log.warning("graph.connection.failed", error=str(exc))
             return False
 
     async def ensure_indexes(self, vector_dimensions: int = 1536) -> None:
@@ -60,15 +74,26 @@ class Neo4jGraph:
                 "FOR (e:Entity) ON EACH [e.name, e.description]"
             )
 
+    @retry(
+        retry=retry_if_exception_type(ServiceUnavailableError),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
     async def ingest_entities(self, entities: list[Entity], batch_size: int = 10_000) -> int:
         """Batch ingest entities using UNWIND + MERGE.
 
         Returns:
             Count of entities written.
+
+        Raises:
+            GraphError: On unrecoverable Neo4j failures.
+            ServiceUnavailableError: On transient connectivity issues (retried automatically).
         """
         if not entities:
             return 0
 
+        _log.info("graph.ingest_entities.start", entity_count=len(entities))
         count = 0
         for i in range(0, len(entities), batch_size):
             batch = entities[i : i + batch_size]
@@ -83,32 +108,44 @@ class Neo4jGraph:
                 for e in batch
             ]
 
-            async with self._driver.session() as session:
-                result = await session.run(
-                    """
-                    UNWIND $entities AS e
-                    MERGE (n:Entity {name: e.name})
-                    ON CREATE SET
-                        n.entity_type = e.entity_type,
-                        n.description = e.description,
-                        n.source = e.source,
-                        n.embedding = e.embedding
-                    ON MATCH SET
-                        n.description = CASE
-                            WHEN size(e.description) > size(n.description)
-                            THEN e.description ELSE n.description END,
-                        n.embedding = CASE
-                            WHEN n.embedding IS NULL THEN e.embedding
-                            ELSE n.embedding END
-                    RETURN count(n) AS written
-                    """,
-                    entities=params,
-                )
-                record = await result.single()
-                count += record["written"] if record else 0
+            try:
+                async with self._driver.session() as session:
+                    result = await session.run(
+                        """
+                        UNWIND $entities AS e
+                        MERGE (n:Entity {name: e.name})
+                        ON CREATE SET
+                            n.entity_type = e.entity_type,
+                            n.description = e.description,
+                            n.source = e.source,
+                            n.embedding = e.embedding
+                        ON MATCH SET
+                            n.description = CASE
+                                WHEN size(e.description) > size(n.description)
+                                THEN e.description ELSE n.description END,
+                            n.embedding = CASE
+                                WHEN n.embedding IS NULL THEN e.embedding
+                                ELSE n.embedding END
+                        RETURN count(n) AS written
+                        """,
+                        entities=params,
+                    )
+                    record = await result.single()
+                    count += record["written"] if record else 0
+            except Neo4jError as exc:
+                if exc.is_retryable():
+                    raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc
+                raise GraphError(f"Neo4j error during entity ingest: {exc}") from exc
 
+        _log.info("graph.ingest_entities.done", written=count)
         return count
 
+    @retry(
+        retry=retry_if_exception_type(ServiceUnavailableError),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
     async def ingest_relationships(
         self, relationships: list[Relationship], batch_size: int = 10_000
     ) -> int:
@@ -116,10 +153,15 @@ class Neo4jGraph:
 
         Returns:
             Count of relationships written.
+
+        Raises:
+            GraphError: On unrecoverable Neo4j failures.
+            ServiceUnavailableError: On transient connectivity issues (retried automatically).
         """
         if not relationships:
             return 0
 
+        _log.info("graph.ingest_relationships.start", relationship_count=len(relationships))
         count = 0
         for i in range(0, len(relationships), batch_size):
             batch = relationships[i : i + batch_size]
@@ -133,22 +175,28 @@ class Neo4jGraph:
                 for r in batch
             ]
 
-            async with self._driver.session() as session:
-                result = await session.run(
-                    """
-                    UNWIND $rels AS r
-                    MATCH (s:Entity {name: r.source})
-                    MATCH (t:Entity {name: r.target})
-                    MERGE (s)-[rel:RELATES_TO {type: r.rel_type}]->(t)
-                    SET rel.description = r.description,
-                        rel.relationship_type = r.rel_type
-                    RETURN count(rel) AS written
-                    """,
-                    rels=params,
-                )
-                record = await result.single()
-                count += record["written"] if record else 0
+            try:
+                async with self._driver.session() as session:
+                    result = await session.run(
+                        """
+                        UNWIND $rels AS r
+                        MATCH (s:Entity {name: r.source})
+                        MATCH (t:Entity {name: r.target})
+                        MERGE (s)-[rel:RELATES_TO {type: r.rel_type}]->(t)
+                        SET rel.description = r.description,
+                            rel.relationship_type = r.rel_type
+                        RETURN count(rel) AS written
+                        """,
+                        rels=params,
+                    )
+                    record = await result.single()
+                    count += record["written"] if record else 0
+            except Neo4jError as exc:
+                if exc.is_retryable():
+                    raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc
+                raise GraphError(f"Neo4j error during relationship ingest: {exc}") from exc
 
+        _log.info("graph.ingest_relationships.done", written=count)
         return count
 
     async def vector_search(
