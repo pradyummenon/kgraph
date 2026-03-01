@@ -208,6 +208,28 @@ def visualize(
 
 
 @app.command()
+def browse(
+    entity_name: Annotated[
+        str | None,
+        typer.Argument(help="Entity to start from (omit for overview)"),
+    ] = None,
+    hops: Annotated[
+        int,
+        typer.Option("--hops", help="Initial neighborhood depth"),
+    ] = 2,
+) -> None:
+    """Launch interactive graph browser TUI."""
+    from kgraph.application.factories import create_graph
+    from kgraph.config import load_config
+    from kgraph.interfaces.browser import GraphBrowser
+
+    config = load_config()
+    graph = create_graph(config)
+    app = GraphBrowser(graph=graph, start_entity=entity_name, hops=hops)
+    app.run()
+
+
+@app.command()
 def stats() -> None:
     """Display knowledge graph statistics."""
     import asyncio
