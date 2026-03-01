@@ -18,7 +18,6 @@ from rich.table import Table
 from rich.tree import Tree
 
 from kgraph.config import (
-    CONFIG_DIR,
     CONFIG_FILE,
     EmbeddingConfig,
     KgraphConfig,
@@ -224,9 +223,9 @@ class IngestUseCase:
                 entity_type=e.entity_type,
                 description=e.description,
                 source=e.source,
-                embedding=emb,
+                embedding=tuple(emb),
             )
-            for e, emb in zip(all_entities, embeddings)
+            for e, emb in zip(all_entities, embeddings, strict=True)
         ]
 
         # Ingest into Neo4j
@@ -265,9 +264,7 @@ class QueryUseCase:
 
         asyncio.run(self._run(question, mode, top_k, hops, show_raw))
 
-    async def _run(
-        self, question: str, mode: str, top_k: int, hops: int, show_raw: bool
-    ) -> None:
+    async def _run(self, question: str, mode: str, top_k: int, hops: int, show_raw: bool) -> None:
         start = time.monotonic()
 
         # Set up embedder
@@ -308,10 +305,7 @@ class QueryUseCase:
             "the provided graph context. If the context doesn't contain enough "
             "information, say so. Cite entity names when referencing information."
         )
-        answer_prompt = (
-            f"Graph context:\n{retrieval.context_text}\n\n"
-            f"Question: {question}"
-        )
+        answer_prompt = f"Graph context:\n{retrieval.context_text}\n\nQuestion: {question}"
 
         if self._config.llm.provider == "gemini":
             from google import genai

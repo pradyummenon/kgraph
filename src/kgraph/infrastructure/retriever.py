@@ -51,9 +51,7 @@ class HybridRetriever:
 
         # Step 2: Graph expansion
         entity_names = [e.name for e in seed_entities]
-        expanded_entities, expanded_rels = await self._graph.expand_neighborhood(
-            entity_names, hops
-        )
+        expanded_entities, expanded_rels = await self._graph.expand_neighborhood(entity_names, hops)
 
         # Step 3: Deduplicate
         all_entities = _deduplicate_entities(seed_entities + expanded_entities)

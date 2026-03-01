@@ -1,9 +1,5 @@
 """Tests for document chunking."""
 
-from pathlib import Path
-
-import pytest
-
 from kgraph.infrastructure.chunker import chunk_text
 
 
