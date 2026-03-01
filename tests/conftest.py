@@ -1,5 +1,7 @@
 """Shared test fixtures for kgraph."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from kgraph.domain.models import Chunk, Entity, EntityType, Relationship
@@ -62,3 +64,23 @@ def sample_relationships() -> list[Relationship]:
             description="First woman to win the Nobel Prize",
         ),
     ]
+
+
+@pytest.fixture
+def mock_graph() -> AsyncMock:
+    """Mock GraphRepository for testing."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_extractor() -> AsyncMock:
+    """Mock EntityExtractor for testing."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_embedder() -> AsyncMock:
+    """Mock EmbeddingGenerator for testing."""
+    mock = AsyncMock()
+    mock.dimensions = 1536
+    return mock

@@ -26,10 +26,14 @@ from kgraph.config import (
     save_config,
 )
 from kgraph.domain.models import Entity
-from kgraph.domain.services import deduplicate_entities, deduplicate_relationships
+from kgraph.domain.services import (
+    EmbeddingGenerator,
+    EntityExtractor,
+    GraphRepository,
+    deduplicate_entities,
+    deduplicate_relationships,
+)
 from kgraph.infrastructure.chunker import chunk_text, read_documents
-from kgraph.infrastructure.embedder import GeminiEmbedder, LocalEmbedder, OpenAIEmbedder
-from kgraph.infrastructure.extractor import ClaudeExtractor, GeminiExtractor
 from kgraph.infrastructure.graph import Neo4jGraph
 from kgraph.infrastructure.retriever import HybridRetriever
 
@@ -131,14 +135,21 @@ class InitUseCase:
 class IngestUseCase:
     """Extract entities and relationships from documents into Neo4j."""
 
-    def __init__(self, config: KgraphConfig, console: Console) -> None:
-        self._config = config
+    def __init__(
+        self,
+        extractor: EntityExtractor,
+        embedder: EmbeddingGenerator,
+        graph: GraphRepository,
+        console: Console,
+    ) -> None:
+        self._extractor = extractor
+        self._embedder = embedder
+        self._graph = graph
         self._console = console
 
-    def execute(self, path: Path, batch_size: int = 10_000) -> None:
-        import asyncio
-
-        asyncio.run(self._run(path, batch_size))
+    async def execute(self, path: Path, batch_size: int = 10_000) -> None:
+        async with self._graph:
+            await self._run(path, batch_size)
 
     async def _run(self, path: Path, batch_size: int) -> None:
         # Read documents
@@ -152,40 +163,6 @@ class IngestUseCase:
             all_chunks.extend(chunks)
         self._console.print(f"  Split into {len(all_chunks)} chunks")
 
-        # Set up extractor based on LLM provider
-        if self._config.llm.provider == "gemini":
-            extractor = GeminiExtractor(
-                api_key=self._config.llm.gemini_api_key,
-                model=self._config.llm.model,
-            )
-        else:
-            extractor = ClaudeExtractor(
-                api_key=self._config.llm.anthropic_api_key,
-                model=self._config.llm.model,
-            )
-
-        # Set up embedder based on embedding provider
-        if self._config.embedding.provider == "openai":
-            embedder = OpenAIEmbedder(
-                api_key=self._config.embedding.openai_api_key,
-                model=self._config.embedding.openai_model,
-                dim=self._config.embedding.dimensions,
-            )
-        elif self._config.embedding.provider == "gemini":
-            embedder = GeminiEmbedder(
-                api_key=self._config.embedding.gemini_api_key,
-                model=self._config.embedding.gemini_model,
-                dim=self._config.embedding.dimensions,
-            )
-        else:
-            embedder = LocalEmbedder(model_name=self._config.embedding.local_model)
-
-        graph = Neo4jGraph(
-            uri=self._config.neo4j.uri,
-            username=self._config.neo4j.username,
-            password=self._config.neo4j.password,
-        )
-
         all_entities: list[Entity] = []
         all_relationships = []
 
@@ -198,7 +175,7 @@ class IngestUseCase:
             task = progress.add_task("Extracting entities...", total=len(all_chunks))
 
             for chunk in all_chunks:
-                result = await extractor.extract(chunk)
+                result = await self._extractor.extract(chunk)
                 all_entities.extend(result.entities)
                 all_relationships.extend(result.relationships)
                 progress.advance(task)
@@ -214,7 +191,7 @@ class IngestUseCase:
         # Generate embeddings
         self._console.print("  Generating embeddings...")
         texts = [e.embedding_text for e in all_entities]
-        embeddings = await embedder.embed(texts)
+        embeddings = await self._embedder.embed(texts)
 
         # Attach embeddings to entities
         entities_with_embeddings = [
@@ -230,9 +207,8 @@ class IngestUseCase:
 
         # Ingest into Neo4j
         self._console.print("  Writing to Neo4j...")
-        entity_count = await graph.ingest_entities(entities_with_embeddings, batch_size)
-        rel_count = await graph.ingest_relationships(all_relationships, batch_size)
-        await graph.close()
+        entity_count = await self._graph.ingest_entities(entities_with_embeddings, batch_size)
+        rel_count = await self._graph.ingest_relationships(all_relationships, batch_size)
 
         # Summary
         table = Table(title="Ingestion Summary")
@@ -248,11 +224,19 @@ class IngestUseCase:
 class QueryUseCase:
     """Query the knowledge graph with natural language."""
 
-    def __init__(self, config: KgraphConfig, console: Console) -> None:
+    def __init__(
+        self,
+        embedder: EmbeddingGenerator,
+        graph: GraphRepository,
+        config: KgraphConfig,
+        console: Console,
+    ) -> None:
+        self._embedder = embedder
+        self._graph = graph
         self._config = config
         self._console = console
 
-    def execute(
+    async def execute(
         self,
         question: str,
         mode: str = "hybrid",
@@ -260,40 +244,17 @@ class QueryUseCase:
         hops: int = 2,
         show_raw: bool = False,
     ) -> None:
-        import asyncio
-
-        asyncio.run(self._run(question, mode, top_k, hops, show_raw))
+        async with self._graph:
+            await self._run(question, mode, top_k, hops, show_raw)
 
     async def _run(self, question: str, mode: str, top_k: int, hops: int, show_raw: bool) -> None:
         start = time.monotonic()
 
-        # Set up embedder
-        if self._config.embedding.provider == "openai":
-            embedder = OpenAIEmbedder(
-                api_key=self._config.embedding.openai_api_key,
-                model=self._config.embedding.openai_model,
-                dim=self._config.embedding.dimensions,
-            )
-        elif self._config.embedding.provider == "gemini":
-            embedder = GeminiEmbedder(
-                api_key=self._config.embedding.gemini_api_key,
-                model=self._config.embedding.gemini_model,
-                dim=self._config.embedding.dimensions,
-            )
-        else:
-            embedder = LocalEmbedder(model_name=self._config.embedding.local_model)
-
-        graph = Neo4jGraph(
-            uri=self._config.neo4j.uri,
-            username=self._config.neo4j.username,
-            password=self._config.neo4j.password,
-        )
-
         # Embed the question
-        question_embedding = (await embedder.embed([question]))[0]
+        question_embedding = (await self._embedder.embed([question]))[0]
 
         # Retrieve context
-        retriever = HybridRetriever(graph)
+        retriever = HybridRetriever(self._graph)
         retrieval = await retriever.retrieve(question_embedding, top_k=top_k, hops=hops)
 
         if show_raw:
@@ -331,8 +292,6 @@ class QueryUseCase:
             answer = response.content[0].text
         elapsed = (time.monotonic() - start) * 1000
 
-        await graph.close()
-
         # Display
         self._console.print(Panel(answer, title="Answer", border_style="green"))
         self._console.print(
@@ -345,32 +304,23 @@ class QueryUseCase:
 class ExploreUseCase:
     """Show an entity's neighborhood as a Rich tree."""
 
-    def __init__(self, config: KgraphConfig, console: Console) -> None:
-        self._config = config
+    def __init__(self, graph: GraphRepository, console: Console) -> None:
+        self._graph = graph
         self._console = console
 
-    def execute(self, entity_name: str, hops: int = 2) -> None:
-        import asyncio
-
-        asyncio.run(self._run(entity_name, hops))
+    async def execute(self, entity_name: str, hops: int = 2) -> None:
+        async with self._graph:
+            await self._run(entity_name, hops)
 
     async def _run(self, entity_name: str, hops: int) -> None:
-        graph = Neo4jGraph(
-            uri=self._config.neo4j.uri,
-            username=self._config.neo4j.username,
-            password=self._config.neo4j.password,
-        )
-
         # Fuzzy match entity name
-        matches = await graph.fulltext_search(entity_name, limit=1)
+        matches = await self._graph.fulltext_search(entity_name, limit=1)
         if not matches:
             self._console.print(f"[red]No entity found matching '{entity_name}'[/red]")
-            await graph.close()
             return
 
         root_entity = matches[0]
-        entities, relationships = await graph.expand_neighborhood([root_entity.name], hops)
-        await graph.close()
+        entities, relationships = await self._graph.expand_neighborhood([root_entity.name], hops)
 
         # Build tree
         tree = Tree(
@@ -402,24 +352,16 @@ class ExploreUseCase:
 class StatsUseCase:
     """Display knowledge graph statistics."""
 
-    def __init__(self, config: KgraphConfig, console: Console) -> None:
-        self._config = config
+    def __init__(self, graph: GraphRepository, console: Console) -> None:
+        self._graph = graph
         self._console = console
 
-    def execute(self) -> None:
-        import asyncio
-
-        asyncio.run(self._run())
+    async def execute(self) -> None:
+        async with self._graph:
+            await self._run()
 
     async def _run(self) -> None:
-        graph = Neo4jGraph(
-            uri=self._config.neo4j.uri,
-            username=self._config.neo4j.username,
-            password=self._config.neo4j.password,
-        )
-
-        stats = await graph.get_stats()
-        await graph.close()
+        stats = await self._graph.get_stats()
 
         table = Table(title="Knowledge Graph Statistics")
         table.add_column("Metric", style="cyan")

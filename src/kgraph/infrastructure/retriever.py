@@ -7,13 +7,13 @@ for answering natural language questions. No LLM at retrieval time.
 from __future__ import annotations
 
 from kgraph.domain.models import Entity, Relationship, RetrievalResult
-from kgraph.infrastructure.graph import Neo4jGraph
+from kgraph.domain.services import GraphRepository
 
 
 class HybridRetriever:
     """Retrieves relevant context using vector search + graph expansion."""
 
-    def __init__(self, graph: Neo4jGraph) -> None:
+    def __init__(self, graph: GraphRepository) -> None:
         self._graph = graph
 
     async def retrieve(
