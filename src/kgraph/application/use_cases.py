@@ -438,6 +438,86 @@ class ExploreUseCase:
         self._console.print(Panel(summary, title="Neighborhood Summary", border_style="dim"))
 
 
+class VisualizeUseCase:
+    """Render knowledge graph as ASCII art."""
+
+    def __init__(self, graph: GraphRepository, console: Console) -> None:
+        self._graph = graph
+        self._console = console
+
+    async def execute(
+        self,
+        entity_name: str | None = None,
+        hops: int = 2,
+        entity_types: set[str] | None = None,
+        show_edge_labels: bool = True,
+        output_path: Path | None = None,
+        max_nodes: int = 50,
+    ) -> None:
+        async with self._graph:
+            await self._run(
+                entity_name, hops, entity_types, show_edge_labels, output_path, max_nodes
+            )
+
+    async def _run(
+        self,
+        entity_name: str | None,
+        hops: int,
+        entity_types: set[str] | None,
+        show_edge_labels: bool,
+        output_path: Path | None,
+        max_nodes: int,
+    ) -> None:
+        from kgraph.infrastructure.renderer import GraphRenderer
+
+        entities, relationships = await self._fetch_subgraph(entity_name, hops, max_nodes)
+
+        if entity_types:
+            entities = [e for e in entities if str(e.entity_type).upper() in entity_types]
+            visible_names = {e.name for e in entities}
+            relationships = [
+                r for r in relationships if r.source in visible_names and r.target in visible_names
+            ]
+
+        renderer = GraphRenderer()
+        rendered = renderer.render(entities, relationships, show_edge_labels=show_edge_labels)
+
+        if output_path is not None:
+            output_path.write_text(rendered)
+            self._console.print(f"  [green]Visualization written to {output_path}[/green]")
+        else:
+            self._console.print(rendered)
+
+        self._print_summary(entities, relationships, entity_name)
+
+    async def _fetch_subgraph(
+        self,
+        entity_name: str | None,
+        hops: int,
+        max_nodes: int,
+    ) -> tuple[list[Entity], list[Relationship]]:
+        if entity_name is None:
+            return await self._graph.get_top_entities(max_nodes)
+
+        matches = await self._graph.fulltext_search(entity_name, limit=1)
+        if not matches:
+            self._console.print(f"[red]No entity found matching '{entity_name}'[/red]")
+            return [], []
+
+        root = matches[0]
+        return await self._graph.expand_neighborhood([root.name], hops)
+
+    def _print_summary(
+        self,
+        entities: list[Entity],
+        relationships: list[Relationship],
+        entity_name: str | None,
+    ) -> None:
+        mode = f"entity: {entity_name}" if entity_name else "overview"
+        summary = f"Mode: {mode}\nEntities: {len(entities)}\nRelationships: {len(relationships)}"
+        self._console.print(Panel(summary, title="Visualization Summary", border_style="dim"))
+
+
 class StatsUseCase:
     """Display knowledge graph statistics."""
 
