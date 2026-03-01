@@ -22,6 +22,19 @@ app = typer.Typer(
 console = Console()
 
 
+@app.callback()
+def main(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable verbose logging"),
+    ] = False,
+) -> None:
+    """Build and query knowledge graphs from documents."""
+    from kgraph.logging import configure_logging
+
+    configure_logging(level="DEBUG" if verbose else "INFO")
+
+
 @app.command()
 def init() -> None:
     """Set up Neo4j connection, API keys, and required indexes."""
@@ -43,12 +56,18 @@ def ingest(
     ] = 10_000,
 ) -> None:
     """Extract entities and relationships from documents into Neo4j."""
+    import asyncio
+
+    from kgraph.application.factories import create_embedder, create_extractor, create_graph
     from kgraph.application.use_cases import IngestUseCase
     from kgraph.config import load_config
 
     config = load_config()
-    use_case = IngestUseCase(config=config, console=console)
-    use_case.execute(path=path, batch_size=batch_size)
+    extractor = create_extractor(config)
+    embedder = create_embedder(config)
+    graph = create_graph(config)
+    use_case = IngestUseCase(extractor=extractor, embedder=embedder, graph=graph, console=console)
+    asyncio.run(use_case.execute(path=path, batch_size=batch_size))
 
 
 @app.command()
@@ -75,17 +94,24 @@ def query(
     ] = False,
 ) -> None:
     """Query the knowledge graph with natural language."""
+    import asyncio
+
+    from kgraph.application.factories import create_embedder, create_graph
     from kgraph.application.use_cases import QueryUseCase
     from kgraph.config import load_config
 
     config = load_config()
-    use_case = QueryUseCase(config=config, console=console)
-    use_case.execute(
-        question=question,
-        mode=mode,
-        top_k=top_k,
-        hops=hops,
-        show_raw=raw,
+    embedder = create_embedder(config)
+    graph = create_graph(config)
+    use_case = QueryUseCase(embedder=embedder, graph=graph, config=config, console=console)
+    asyncio.run(
+        use_case.execute(
+            question=question,
+            mode=mode,
+            top_k=top_k,
+            hops=hops,
+            show_raw=raw,
+        )
     )
 
 
@@ -101,23 +127,31 @@ def explore(
     ] = 2,
 ) -> None:
     """Show an entity's neighborhood as a Rich tree."""
+    import asyncio
+
+    from kgraph.application.factories import create_graph
     from kgraph.application.use_cases import ExploreUseCase
     from kgraph.config import load_config
 
     config = load_config()
-    use_case = ExploreUseCase(config=config, console=console)
-    use_case.execute(entity_name=entity_name, hops=hops)
+    graph = create_graph(config)
+    use_case = ExploreUseCase(graph=graph, console=console)
+    asyncio.run(use_case.execute(entity_name=entity_name, hops=hops))
 
 
 @app.command()
 def stats() -> None:
     """Display knowledge graph statistics."""
+    import asyncio
+
+    from kgraph.application.factories import create_graph
     from kgraph.application.use_cases import StatsUseCase
     from kgraph.config import load_config
 
     config = load_config()
-    use_case = StatsUseCase(config=config, console=console)
-    use_case.execute()
+    graph = create_graph(config)
+    use_case = StatsUseCase(graph=graph, console=console)
+    asyncio.run(use_case.execute())
 
 
 if __name__ == "__main__":

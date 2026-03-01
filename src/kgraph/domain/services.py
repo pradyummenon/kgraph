@@ -74,6 +74,14 @@ class GraphRepository(Protocol):
         """Release all database connections and resources."""
         ...
 
+    async def __aenter__(self) -> GraphRepository:
+        """Enter async context manager."""
+        ...
+
+    async def __aexit__(self, *args: object) -> None:
+        """Exit async context manager, closing all connections."""
+        ...
+
 
 def deduplicate_entities(entities: list[Entity]) -> list[Entity]:
     """Deduplicate entities by normalized name.
