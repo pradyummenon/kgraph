@@ -125,18 +125,36 @@ def explore(
         int,
         typer.Option("--hops", help="Neighborhood depth"),
     ] = 2,
+    types: Annotated[
+        str | None,
+        typer.Option("--types", "-t", help="Comma-separated entity type filter"),
+    ] = None,
+    rels: Annotated[
+        str | None,
+        typer.Option("--rels", "-r", help="Comma-separated relationship type filter"),
+    ] = None,
 ) -> None:
-    """Show an entity's neighborhood as a Rich tree."""
+    """Show an entity's neighborhood as a Rich tree with incoming/outgoing edges."""
     import asyncio
 
     from kgraph.application.factories import create_graph
     from kgraph.application.use_cases import ExploreUseCase
     from kgraph.config import load_config
 
+    type_filters = set(types.upper().split(",")) if types else None
+    rel_filters = set(rels.upper().split(",")) if rels else None
+
     config = load_config()
     graph = create_graph(config)
     use_case = ExploreUseCase(graph=graph, console=console)
-    asyncio.run(use_case.execute(entity_name=entity_name, hops=hops))
+    asyncio.run(
+        use_case.execute(
+            entity_name=entity_name,
+            hops=hops,
+            type_filters=type_filters,
+            rel_filters=rel_filters,
+        )
+    )
 
 
 @app.command()

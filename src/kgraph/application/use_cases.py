@@ -25,7 +25,7 @@ from kgraph.config import (
     Neo4jConfig,
     save_config,
 )
-from kgraph.domain.models import Entity
+from kgraph.domain.models import Entity, Relationship
 from kgraph.domain.services import (
     EmbeddingGenerator,
     EntityExtractor,
@@ -309,18 +309,29 @@ class QueryUseCase:
 
 
 class ExploreUseCase:
-    """Show an entity's neighborhood as a Rich tree."""
+    """Show an entity's neighborhood as a Rich tree with optional filters."""
 
     def __init__(self, graph: GraphRepository, console: Console) -> None:
         self._graph = graph
         self._console = console
 
-    async def execute(self, entity_name: str, hops: int = 2) -> None:
+    async def execute(
+        self,
+        entity_name: str,
+        hops: int = 2,
+        type_filters: set[str] | None = None,
+        rel_filters: set[str] | None = None,
+    ) -> None:
         async with self._graph:
-            await self._run(entity_name, hops)
+            await self._run(entity_name, hops, type_filters, rel_filters)
 
-    async def _run(self, entity_name: str, hops: int) -> None:
-        # Fuzzy match entity name
+    async def _run(
+        self,
+        entity_name: str,
+        hops: int,
+        type_filters: set[str] | None,
+        rel_filters: set[str] | None,
+    ) -> None:
         matches = await self._graph.fulltext_search(entity_name, limit=1)
         if not matches:
             self._console.print(f"[red]No entity found matching '{entity_name}'[/red]")
@@ -329,31 +340,102 @@ class ExploreUseCase:
         root_entity = matches[0]
         entities, relationships = await self._graph.expand_neighborhood([root_entity.name], hops)
 
+        # Apply entity type filter
+        if type_filters:
+            entities = [e for e in entities if str(e.entity_type).upper() in type_filters]
+
+        # Build entity lookup (root always included so its edges can be resolved)
+        entity_map = {e.name: e for e in entities}
+        visible_names = {root_entity.name} | set(entity_map)
+
+        # Drop relationships whose endpoints are not in the visible set,
+        # then apply optional relationship type filter
+        relationships = [
+            r for r in relationships if r.source in visible_names and r.target in visible_names
+        ]
+        if rel_filters:
+            relationships = [r for r in relationships if r.relationship_type.upper() in rel_filters]
+
         # Build tree
         tree = Tree(
             f"[bold cyan]{root_entity.name}[/bold cyan] "
             f"({root_entity.entity_type}) — {root_entity.description}"
         )
 
-        # Group relationships by type
-        rels_from_root = [r for r in relationships if r.source == root_entity.name]
-        by_type: dict[str, list[str]] = {}
-        for r in rels_from_root:
-            by_type.setdefault(r.relationship_type, []).append(r.target)
-
-        for rel_type, targets in by_type.items():
-            branch = tree.add(f"[yellow]{rel_type}[/yellow]")
-            for target_name in targets:
-                target = next((e for e in entities if e.name == target_name), None)
-                if target:
-                    branch.add(
-                        f"[green]{target.name}[/green] "
-                        f"({target.entity_type}) — {target.description}"
-                    )
-                else:
-                    branch.add(f"[green]{target_name}[/green]")
+        visited: set[str] = {root_entity.name}
+        self._build_tree(root_entity.name, entity_map, relationships, tree, visited, 1, hops)
 
         self._console.print(tree)
+        self._print_summary(root_entity, entities, relationships, hops)
+
+    def _build_tree(
+        self,
+        entity_name: str,
+        entity_map: dict[str, Entity],
+        relationships: list[Relationship],
+        parent: Tree,
+        visited: set[str],
+        depth: int,
+        max_depth: int,
+    ) -> None:
+        if depth > max_depth:
+            return
+
+        # Outgoing edges
+        for rel in relationships:
+            if rel.source != entity_name:
+                continue
+            target = entity_map.get(rel.target)
+            label = f"[yellow]--{rel.relationship_type}-->[/yellow] "
+            label += (
+                f"[green]{target.name}[/green] ({target.entity_type})"
+                if target
+                else f"[green]{rel.target}[/green]"
+            )
+            branch = parent.add(label)
+            if rel.target not in visited and rel.target in entity_map:
+                visited.add(rel.target)
+                self._build_tree(
+                    rel.target, entity_map, relationships, branch, visited, depth + 1, max_depth
+                )
+
+        # Incoming edges
+        for rel in relationships:
+            if rel.target != entity_name:
+                continue
+            source = entity_map.get(rel.source)
+            label = f"[blue]<--{rel.relationship_type}--[/blue] "
+            label += (
+                f"[green]{source.name}[/green] ({source.entity_type})"
+                if source
+                else f"[green]{rel.source}[/green]"
+            )
+            branch = parent.add(label)
+            if rel.source not in visited and rel.source in entity_map:
+                visited.add(rel.source)
+                self._build_tree(
+                    rel.source, entity_map, relationships, branch, visited, depth + 1, max_depth
+                )
+
+    def _print_summary(
+        self,
+        root: Entity,
+        entities: list[Entity],
+        relationships: list[Relationship],
+        hops: int,
+    ) -> None:
+        from collections import Counter
+
+        type_counts = Counter(str(e.entity_type) for e in entities)
+        type_lines = [f"  {t}: {c}" for t, c in type_counts.most_common()]
+        summary = (
+            f"Root: {root.name} ({root.entity_type})\n"
+            f"Entities: {len(entities)}\n"
+            f"Relationships: {len(relationships)}\n"
+            f"Max depth: {hops}\n"
+            f"Type distribution:\n" + "\n".join(type_lines)
+        )
+        self._console.print(Panel(summary, title="Neighborhood Summary", border_style="dim"))
 
 
 class StatsUseCase:

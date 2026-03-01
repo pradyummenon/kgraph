@@ -69,7 +69,10 @@ def sample_relationships() -> list[Relationship]:
 @pytest.fixture
 def mock_graph() -> AsyncMock:
     """Mock GraphRepository for testing."""
-    return AsyncMock()
+    mock = AsyncMock()
+    mock.__aenter__ = AsyncMock(return_value=mock)
+    mock.__aexit__ = AsyncMock(return_value=None)
+    return mock
 
 
 @pytest.fixture
@@ -84,3 +87,57 @@ def mock_embedder() -> AsyncMock:
     mock = AsyncMock()
     mock.dimensions = 1536
     return mock
+
+
+@pytest.fixture
+def multi_hop_entities() -> list[Entity]:
+    return [
+        Entity(
+            name="Python",
+            entity_type=EntityType.TECHNOLOGY,
+            description="Programming language",
+            source="test.md",
+        ),
+        Entity(
+            name="Django",
+            entity_type=EntityType.TECHNOLOGY,
+            description="Python web framework",
+            source="test.md",
+        ),
+        Entity(
+            name="Flask",
+            entity_type=EntityType.TECHNOLOGY,
+            description="Python micro framework",
+            source="test.md",
+        ),
+        Entity(
+            name="Guido van Rossum",
+            entity_type=EntityType.PERSON,
+            description="Creator of Python",
+            source="test.md",
+        ),
+    ]
+
+
+@pytest.fixture
+def multi_hop_relationships() -> list[Relationship]:
+    return [
+        Relationship(
+            source="Django",
+            target="Python",
+            relationship_type="BUILT_WITH",
+            description="Django is built with Python",
+        ),
+        Relationship(
+            source="Flask",
+            target="Python",
+            relationship_type="BUILT_WITH",
+            description="Flask is built with Python",
+        ),
+        Relationship(
+            source="Guido van Rossum",
+            target="Python",
+            relationship_type="CREATED",
+            description="Guido created Python",
+        ),
+    ]
