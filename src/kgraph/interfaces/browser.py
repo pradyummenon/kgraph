@@ -77,7 +77,7 @@ class GraphBrowser(App):
     def _refresh_tree(self) -> None:
         tree = self.query_one("#entity-tree", Tree)
         tree.clear()
-        for entity in sorted(self._state.visible_entities, key=lambda e: e.name):
+        for entity in sorted(self._state.filtered_entities, key=lambda e: e.name):
             tree.root.add_leaf(f"{entity.name} ({entity.entity_type})", data=entity.name)
         tree.root.expand()
 
@@ -89,6 +89,11 @@ class GraphBrowser(App):
         view = self.query_one("#graph-view", Static)
         view.update(output)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "search-input":
+            self._state.search_filter = event.value
+            self._refresh_tree()
+
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         if event.node.data:
             self._state.selected_entity = event.node.data
@@ -98,13 +103,15 @@ class GraphBrowser(App):
     def _refresh_details(self) -> None:
         entity = self._state.entities.get(self._state.selected_entity or "")
         panel = self.query_one("#details-panel", Static)
-        if entity:
-            panel.update(
-                f"Name: {entity.name}\n"
-                f"Type: {entity.entity_type}\n"
-                f"Description: {entity.description}\n"
-                f"Source: {entity.source}"
-            )
+        if not entity:
+            panel.update("Select an entity to view details")
+            return
+        panel.update(
+            f"Name: {entity.name}\n"
+            f"Type: {entity.entity_type}\n"
+            f"Description: {entity.description}\n"
+            f"Source: {entity.source}"
+        )
 
     def _refresh_relationships(self) -> None:
         table = self.query_one("#relationships-table", DataTable)
@@ -112,9 +119,8 @@ class GraphBrowser(App):
         name = self._state.selected_entity
         if not name:
             return
-        for rel in self._state.visible_relationships:
-            if rel.source == name or rel.target == name:
-                table.add_row(rel.source, rel.relationship_type, rel.target, rel.description)
+        for rel in self._state.relationships_for(name):
+            table.add_row(rel.source, rel.relationship_type, rel.target, rel.description)
 
     def action_focus_search(self) -> None:
         self.query_one("#search-input", Input).focus()
@@ -134,7 +140,24 @@ class GraphBrowser(App):
         self._refresh_graph_view()
 
     def action_toggle_filters(self) -> None:
-        pass
+        all_types = sorted(self._state.entity_types)
+        if not all_types:
+            return
+        current = self._state.type_filters
+        if not current:
+            self._state.type_filters = {all_types[0]}
+        elif len(current) < len(all_types):
+            current_list = sorted(current)
+            last = current_list[-1]
+            next_index = all_types.index(last) + 1
+            if next_index < len(all_types):
+                self._state.type_filters = {all_types[next_index]}
+            else:
+                self._state.type_filters = set()
+        else:
+            self._state.type_filters = set()
+        self._refresh_tree()
+        self._refresh_graph_view()
 
     def action_refresh(self) -> None:
         from kgraph.application.graph_state import GraphState
