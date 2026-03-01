@@ -12,8 +12,13 @@ import anthropic
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from kgraph.domain.errors import ExtractionError, RateLimitError
 from kgraph.domain.models import Chunk, Entity, EntityType, ExtractionResult, Relationship
+from kgraph.infrastructure.logging import get_logger
+
+_log = get_logger(__name__)
 
 
 class ExtractedEntity(BaseModel):
@@ -73,6 +78,12 @@ class ClaudeExtractor:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
 
+    @retry(
+        retry=retry_if_exception_type(RateLimitError),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
     async def extract(self, chunk: Chunk) -> ExtractionResult:
         """Extract entities and relationships from a text chunk.
 
@@ -81,22 +92,37 @@ class ClaudeExtractor:
 
         Returns:
             ExtractionResult with entities and relationships.
+
+        Raises:
+            ExtractionError: On unrecoverable API or parsing failures.
+            RateLimitError: On rate limit responses (retried automatically).
         """
-        response = await self._client.messages.create(
-            model=self._model,
-            max_tokens=4096,
-            system=EXTRACTION_SYSTEM,
-            tools=[EXTRACTION_TOOL],
-            tool_choice={"type": "tool", "name": "extract_knowledge"},
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Extract entities and relationships from this text:\n\n{chunk.text}"
-                    ),
-                }
-            ],
+        _log.debug(
+            "extractor.claude.start",
+            source=chunk.source_reference,
+            text_length=len(chunk.text),
         )
+        try:
+            response = await self._client.messages.create(
+                model=self._model,
+                max_tokens=4096,
+                system=EXTRACTION_SYSTEM,
+                tools=[EXTRACTION_TOOL],
+                tool_choice={"type": "tool", "name": "extract_knowledge"},
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Extract entities and relationships from this text:\n\n{chunk.text}"
+                        ),
+                    }
+                ],
+            )
+        except anthropic.RateLimitError as exc:
+            _log.warning("extractor.claude.rate_limit", source=chunk.source_reference)
+            raise RateLimitError("Anthropic rate limit exceeded") from exc
+        except anthropic.APIError as exc:
+            raise ExtractionError(f"Anthropic API error: {exc}") from exc
 
         # Parse the tool use response
         entities: list[Entity] = []
@@ -126,6 +152,12 @@ class ClaudeExtractor:
                     for r in output.relationships
                 ]
 
+        _log.info(
+            "extractor.claude.done",
+            source=chunk.source_reference,
+            entity_count=len(entities),
+            relationship_count=len(relationships),
+        )
         return ExtractionResult(
             entities=entities,
             relationships=relationships,
@@ -140,22 +172,44 @@ class GeminiExtractor:
         self._client = genai.Client(api_key=api_key)
         self._model = model
 
+    @retry(
+        retry=retry_if_exception_type(RateLimitError),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
     async def extract(self, chunk: Chunk) -> ExtractionResult:
         """Extract entities and relationships from a text chunk.
 
         Uses Gemini's structured JSON output with the same schema
         as the Claude extractor for consistency.
+
+        Raises:
+            ExtractionError: On unrecoverable API or parsing failures.
+            RateLimitError: On rate limit responses (retried automatically).
         """
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=f"Extract entities and relationships from this text:\n\n{chunk.text}",
-            config=genai_types.GenerateContentConfig(
-                system_instruction=EXTRACTION_SYSTEM,
-                response_mime_type="application/json",
-                response_schema=ExtractionOutput,
-                temperature=0.0,
-            ),
+        _log.debug(
+            "extractor.gemini.start",
+            source=chunk.source_reference,
+            text_length=len(chunk.text),
         )
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=f"Extract entities and relationships from this text:\n\n{chunk.text}",
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=EXTRACTION_SYSTEM,
+                    response_mime_type="application/json",
+                    response_schema=ExtractionOutput,
+                    temperature=0.0,
+                ),
+            )
+        except Exception as exc:
+            error_str = str(exc).lower()
+            if "rate" in error_str or "quota" in error_str or "429" in error_str:
+                _log.warning("extractor.gemini.rate_limit", source=chunk.source_reference)
+                raise RateLimitError("Gemini rate limit exceeded") from exc
+            raise ExtractionError(f"Gemini API error: {exc}") from exc
 
         # Parse the JSON response
         entities: list[Entity] = []
@@ -183,10 +237,19 @@ class GeminiExtractor:
                 )
                 for r in output.relationships
             ]
-        except (json.JSONDecodeError, Exception):
-            # If parsing fails, return empty result rather than crashing
-            pass
+        except json.JSONDecodeError as exc:
+            _log.warning(
+                "extractor.gemini.parse_failure",
+                source=chunk.source_reference,
+                error=str(exc),
+            )
 
+        _log.info(
+            "extractor.gemini.done",
+            source=chunk.source_reference,
+            entity_count=len(entities),
+            relationship_count=len(relationships),
+        )
         return ExtractionResult(
             entities=entities,
             relationships=relationships,
