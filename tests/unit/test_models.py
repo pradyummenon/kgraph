@@ -32,7 +32,12 @@ class TestDeduplication:
     def test_deduplicate_entities_by_normalized_name(self) -> None:
         entities = [
             Entity(name="Marie Curie", entity_type="PERSON", description="Short", source="a"),
-            Entity(name="marie curie", entity_type="PERSON", description="Longer description", source="b"),
+            Entity(
+                name="marie curie",
+                entity_type="PERSON",
+                description="Longer description",
+                source="b",
+            ),
         ]
         result = deduplicate_entities(entities)
         assert len(result) == 1
@@ -41,7 +46,12 @@ class TestDeduplication:
     def test_deduplicate_relationships(self) -> None:
         rels = [
             Relationship(source="A", target="B", relationship_type="KNOWS", description="v1"),
-            Relationship(source="a", target="b", relationship_type="KNOWS", description="longer v2"),
+            Relationship(
+                source="a",
+                target="b",
+                relationship_type="KNOWS",
+                description="longer v2",
+            ),
         ]
         result = deduplicate_relationships(rels)
         assert len(result) == 1

@@ -6,12 +6,12 @@ API keys, and embedding preferences.
 
 from __future__ import annotations
 
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import tomli_w
+import tomllib
 
 CONFIG_DIR = Path.home() / ".kgraph"
 CONFIG_FILE = CONFIG_DIR / "config.toml"

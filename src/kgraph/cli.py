@@ -9,7 +9,7 @@ Commands:
 """
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console

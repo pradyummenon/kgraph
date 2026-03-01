@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import neo4j
 from neo4j import AsyncGraphDatabase
 
 from kgraph.domain.models import Entity, Relationship

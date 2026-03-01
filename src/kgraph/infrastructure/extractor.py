@@ -91,7 +91,9 @@ class ClaudeExtractor:
             messages=[
                 {
                     "role": "user",
-                    "content": f"Extract entities and relationships from this text:\n\n{chunk.text}",
+                    "content": (
+                        f"Extract entities and relationships from this text:\n\n{chunk.text}"
+                    ),
                 }
             ],
         )

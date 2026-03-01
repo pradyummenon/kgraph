@@ -52,9 +52,7 @@ class GraphRepository(Protocol):
         """Batch ingest relationships. Returns count of relationships written."""
         ...
 
-    async def vector_search(
-        self, embedding: list[float], top_k: int
-    ) -> list[tuple[Entity, float]]:
+    async def vector_search(self, embedding: list[float], top_k: int) -> list[tuple[Entity, float]]:
         """Find similar entities by vector similarity. Returns (entity, score) pairs."""
         ...
 
