@@ -10,6 +10,7 @@ from typing import Any
 
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
+from neo4j.exceptions import ServiceUnavailable as Neo4jServiceUnavailable
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from kgraph.domain.errors import GraphError, ServiceUnavailableError
@@ -132,6 +133,8 @@ class Neo4jGraph:
                     )
                     record = await result.single()
                     count += record["written"] if record else 0
+            except Neo4jServiceUnavailable as exc:
+                raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc
             except Neo4jError as exc:
                 if exc.is_retryable():
                     raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc
@@ -191,6 +194,8 @@ class Neo4jGraph:
                     )
                     record = await result.single()
                     count += record["written"] if record else 0
+            except Neo4jServiceUnavailable as exc:
+                raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc
             except Neo4jError as exc:
                 if exc.is_retryable():
                     raise ServiceUnavailableError(f"Neo4j transient error: {exc}") from exc

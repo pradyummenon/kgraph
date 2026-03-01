@@ -25,6 +25,9 @@ target/
 # node
 node_modules/
 
+# claude code
+.claude/
+
 # os
 .DS_Store
 Thumbs.db
