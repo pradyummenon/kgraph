@@ -1,0 +1,34 @@
+#sidebar {
+    width: 30%;
+    height: 100%;
+    dock: left;
+}
+
+#main-panel {
+    width: 70%;
+    height: 100%;
+}
+
+#graph-view {
+    height: 60%;
+    border: solid green;
+}
+
+#relationships-table {
+    height: 40%;
+}
+
+#search-input {
+    dock: top;
+}
+
+#details-panel {
+    height: auto;
+    max-height: 30%;
+    border: solid dim;
+    padding: 1;
+}
+
+#entity-tree {
+    height: 1fr;
+}

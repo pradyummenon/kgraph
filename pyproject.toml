@@ -37,6 +37,9 @@ viz = [
     "networkx>=3.0",
     "phart>=0.5.0",
 ]
+tui = [
+    "textual>=0.50.0",
+]
 
 [project.scripts]
 kgraph = "kgraph.cli:app"
@@ -64,3 +67,8 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "textual-dev>=1.0",
+]
