@@ -17,6 +17,8 @@ dependencies = [
     "tomli>=2.0; python_version < '3.11'",
     "tomli-w>=1.0",
     "google-genai>=1.0.0",
+    "structlog>=24.0.0",
+    "tenacity>=8.0.0",
 ]
 
 [project.optional-dependencies]
