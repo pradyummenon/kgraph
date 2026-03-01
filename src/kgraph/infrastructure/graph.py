@@ -247,11 +247,17 @@ class Neo4jGraph:
 
         Args:
             entity_names: Starting entity names.
-            hops: Number of hops to traverse.
+            hops: Number of hops to traverse. Must be between 1 and 10.
 
         Returns:
             Tuple of (entities, relationships) in the expanded neighborhood.
+
+        Raises:
+            GraphError: If hops is outside the allowed range.
         """
+        if not 1 <= hops <= 10:
+            raise GraphError(f"hops must be between 1 and 10, got {hops}")
+
         async with self._driver.session() as session:
             result = await session.run(
                 f"""
