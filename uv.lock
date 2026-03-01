@@ -814,6 +814,11 @@ local = [
     { name = "sentence-transformers" },
     { name = "torch" },
 ]
+viz = [
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "phart" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -821,7 +826,9 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "neo4j", specifier = ">=5.0.0" },
+    { name = "networkx", marker = "extra == 'viz'", specifier = ">=3.0" },
     { name = "openai", specifier = ">=1.0.0" },
+    { name = "phart", marker = "extra == 'viz'", specifier = ">=0.5.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
@@ -836,7 +843,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'local'", specifier = ">=2.0" },
     { name = "typer", extras = ["all"], specifier = ">=0.9.0" },
 ]
-provides-extras = ["local", "dev"]
+provides-extras = ["local", "dev", "viz"]
 
 [[package]]
 name = "librt"
@@ -1447,6 +1454,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fa/36/e27608899f9b8d4dff0617b2d9ab17ca5608956ca44461ac14ac48b44015/pathspec-1.0.4.tar.gz", hash = "sha256:0210e2ae8a21a9137c0d470578cb0e595af87edaa6ebf12ff176f14a02e0e645", size = 131200, upload-time = "2026-01-27T03:59:46.938Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/3c/2c197d226f9ea224a9ab8d197933f9da0ae0aac5b6e0f884e2b8d9c8e9f7/pathspec-1.0.4-py3-none-any.whl", hash = "sha256:fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723", size = 55206, upload-time = "2026-01-27T03:59:45.137Z" },
+]
+
+[[package]]
+name = "phart"
+version = "1.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/14/f4/ab90e7d22b38cc1bad5a72683f8739137fa42f9e2336c92b82dee4cea87e/phart-1.1.4.tar.gz", hash = "sha256:2691e31152a938f48d51d5236715811ede80142a5c8b59d24568435f11ba9f2c", size = 264815, upload-time = "2025-01-25T12:59:36.687Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/20/dc20da33dd3f3fffa5584d35bdfe0dd31847d4f0443495dba6b2cd4ae70a/phart-1.1.4-py3-none-any.whl", hash = "sha256:b34fd91dfb61fc60a2704d9ee2e12bc89a95291efe6e114c7b191244bc5ad8f1", size = 19542, upload-time = "2025-01-25T12:59:35.107Z" },
 ]
 
 [[package]]
