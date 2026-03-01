@@ -66,6 +66,10 @@ class GraphRepository(Protocol):
         """Search entities by name/description using full-text index."""
         ...
 
+    async def get_top_entities(self, limit: int = 50) -> tuple[list[Entity], list[Relationship]]:
+        """Get the most connected entities and their relationships for overview visualization."""
+        ...
+
     async def get_stats(self) -> dict[str, int]:
         """Get graph statistics (node count, relationship count, etc.)."""
         ...
