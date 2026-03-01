@@ -6,6 +6,7 @@ API keys, and embedding preferences.
 
 from __future__ import annotations
 
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -78,6 +79,17 @@ def load_config() -> KgraphConfig:
         )
         raise FileNotFoundError(msg)
 
+    file_stat = CONFIG_FILE.stat()
+    if file_stat.st_mode & stat.S_IROTH:
+        import structlog
+
+        _log = structlog.get_logger(__name__)
+        _log.warning(
+            "config.insecure_permissions",
+            path=str(CONFIG_FILE),
+            hint="Config file is world-readable. Consider: chmod 600",
+        )
+
     with CONFIG_FILE.open("rb") as f:
         data: dict[str, Any] = tomllib.load(f)
 
@@ -146,3 +158,6 @@ def save_config(config: KgraphConfig) -> None:
 
     with CONFIG_FILE.open("wb") as f:
         tomli_w.dump(data, f)
+
+    # Restrict permissions: owner read/write only (no group or other access)
+    CONFIG_FILE.chmod(0o600)
