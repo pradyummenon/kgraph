@@ -25,6 +25,7 @@ class GraphState:
     selected_entity: str | None = None
     expanded_entities: set[str] = field(default_factory=set)
     type_filters: set[str] = field(default_factory=set)
+    search_filter: str = ""
 
     def add_neighborhood(self, entities: list[Entity], relationships: list[Relationship]) -> None:
         """Merge entities and relationships into state, deduplicating."""
@@ -53,6 +54,23 @@ class GraphState:
         visible_names = {e.name for e in self.visible_entities}
         return [
             r for r in self.relationships if r.source in visible_names and r.target in visible_names
+        ]
+
+    @property
+    def filtered_entities(self) -> list[Entity]:
+        """Apply both type filters and search filter."""
+        entities = self.visible_entities
+        if not self.search_filter:
+            return entities
+        query = self.search_filter.lower()
+        return [e for e in entities if query in e.name.lower() or query in e.description.lower()]
+
+    def relationships_for(self, entity_name: str) -> list[Relationship]:
+        """Return visible relationships where entity_name is source or target."""
+        return [
+            r
+            for r in self.visible_relationships
+            if r.source == entity_name or r.target == entity_name
         ]
 
     @property
