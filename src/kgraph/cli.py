@@ -158,6 +158,56 @@ def explore(
 
 
 @app.command()
+def visualize(
+    entity_name: Annotated[
+        str | None,
+        typer.Argument(help="Entity name to center on (omit for overview)"),
+    ] = None,
+    hops: Annotated[
+        int,
+        typer.Option("--hops", help="Neighborhood depth for entity-centered mode"),
+    ] = 2,
+    types: Annotated[
+        str | None,
+        typer.Option("--types", "-t", help="Comma-separated entity type filter"),
+    ] = None,
+    no_labels: Annotated[
+        bool,
+        typer.Option("--no-labels", help="Omit edge labels from the ASCII diagram"),
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write ASCII diagram to this file path"),
+    ] = None,
+    max_nodes: Annotated[
+        int,
+        typer.Option("--max-nodes", help="Maximum number of nodes for overview mode"),
+    ] = 50,
+) -> None:
+    """Render knowledge graph as ASCII art."""
+    import asyncio
+
+    from kgraph.application.factories import create_graph
+    from kgraph.application.use_cases import VisualizeUseCase
+    from kgraph.config import load_config
+
+    type_filters = set(types.upper().split(",")) if types else None
+    config = load_config()
+    graph = create_graph(config)
+    use_case = VisualizeUseCase(graph=graph, console=console)
+    asyncio.run(
+        use_case.execute(
+            entity_name=entity_name,
+            hops=hops,
+            entity_types=type_filters,
+            show_edge_labels=not no_labels,
+            output_path=output,
+            max_nodes=max_nodes,
+        )
+    )
+
+
+@app.command()
 def stats() -> None:
     """Display knowledge graph statistics."""
     import asyncio

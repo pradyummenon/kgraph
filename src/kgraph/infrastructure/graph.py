@@ -348,6 +348,73 @@ class Neo4jGraph:
             for r in records
         ]
 
+    async def get_top_entities(self, limit: int = 50) -> tuple[list[Entity], list[Relationship]]:
+        """Get the most connected entities and their relationships for overview visualization.
+
+        Entities are ordered by degree (total number of relationships) descending.
+        Returns only relationships where both endpoints are in the top-N set.
+
+        Args:
+            limit: Maximum number of entities to return.
+
+        Returns:
+            Tuple of (entities, relationships) for the top connected entities.
+        """
+        async with self._driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (n:Entity)
+                WITH n, size([(n)-[]-() | 1]) AS degree
+                ORDER BY degree DESC
+                LIMIT $limit
+                WITH collect(n) AS top_nodes
+                UNWIND top_nodes AS node
+                OPTIONAL MATCH (node)-[rel:RELATES_TO]->(other:Entity)
+                WHERE other IN top_nodes
+                RETURN
+                    COLLECT(DISTINCT {
+                        name: node.name,
+                        entity_type: node.entity_type,
+                        description: node.description,
+                        source: node.source
+                    }) AS entities,
+                    COLLECT(DISTINCT {
+                        source: startNode(rel).name,
+                        target: endNode(rel).name,
+                        rel_type: rel.relationship_type,
+                        description: rel.description
+                    }) AS relationships
+                """,
+                limit=limit,
+            )
+            record = await result.single()
+
+        if not record:
+            return [], []
+
+        entities = [
+            Entity(
+                name=e["name"],
+                entity_type=EntityType.from_llm_output(e["entity_type"]),
+                description=e["description"] or "",
+                source=e["source"] or "",
+            )
+            for e in record["entities"]
+        ]
+
+        relationships = [
+            Relationship(
+                source=r["source"],
+                target=r["target"],
+                relationship_type=r["rel_type"] or "RELATES_TO",
+                description=r["description"] or "",
+            )
+            for r in record["relationships"]
+            if r["source"] is not None and r["target"] is not None
+        ]
+
+        return entities, relationships
+
     async def get_stats(self) -> dict[str, Any]:
         """Get graph statistics."""
         async with self._driver.session() as session:
